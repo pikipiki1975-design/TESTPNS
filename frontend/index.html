@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>선사 스케쥴 조회</title>
+<style>
+  body { font-family: -apple-system, "Malgun Gothic", sans-serif; max-width: 960px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 20px; }
+  form { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 8px; align-items: end; margin-bottom: 20px; }
+  label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 6px 8px; box-sizing: border-box; }
+  button { padding: 7px 16px; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; }
+  button:hover { background: #1d4ed8; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e5e5; }
+  th { background: #f5f5f5; }
+  #status { color: #666; font-size: 13px; margin-bottom: 8px; }
+  #mockBanner { display: none; background: #fff3cd; border: 1px solid #ffe69c; padding: 8px 12px; border-radius: 4px; margin-bottom: 16px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>선사 스케쥴 조회 (내부용)</h1>
+  <div id="mockBanner">API 키가 설정되지 않아 목업(mock) 데이터로 동작 중입니다. <code>.env</code>에 SEARATES_API_KEY를 설정하면 실제 데이터로 전환됩니다.</div>
+
+  <form id="searchForm">
+    <div>
+      <label>출발항 (UN/LOCODE)</label>
+      <input name="origin" placeholder="KRPUS" required />
+    </div>
+    <div>
+      <label>도착항 (UN/LOCODE)</label>
+      <input name="destination" placeholder="CNSGH" required />
+    </div>
+    <div>
+      <label>출발일</label>
+      <input name="from_date" type="date" required />
+    </div>
+    <div>
+      <label>선사 SCAC (선택)</label>
+      <input name="carriers" placeholder="HDMU,MAEU" />
+    </div>
+    <button type="submit">조회하기</button>
+  </form>
+
+  <div id="status"></div>
+  <table id="resultTable" style="display:none">
+    <thead>
+      <tr>
+        <th>선사</th>
+        <th>선박명 / 항차</th>
+        <th>출항일 (ETD)</th>
+        <th>도착일 (ETA)</th>
+        <th>소요일 (T/T)</th>
+        <th>직항 여부</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+<script>
+const form = document.getElementById('searchForm');
+const statusEl = document.getElementById('status');
+const table = document.getElementById('resultTable');
+const tbody = table.querySelector('tbody');
+
+// 오늘 날짜를 기본값으로
+form.from_date.valueAsDate = new Date();
+
+fetch('/api/health').then(r => r.json()).then(h => {
+  if (h.mock_mode) document.getElementById('mockBanner').style.display = 'block';
+});
+
+function fmtDate(iso) {
+  if (!iso) return '-';
+  return iso.replace('T', ' ').slice(0, 16);
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const params = new URLSearchParams();
+  params.set('origin', form.origin.value.trim().toUpperCase());
+  params.set('destination', form.destination.value.trim().toUpperCase());
+  params.set('from_date', form.from_date.value);
+  if (form.carriers.value.trim()) params.set('carriers', form.carriers.value.trim().toUpperCase());
+
+  statusEl.textContent = '조회 중...';
+  table.style.display = 'none';
+  tbody.innerHTML = '';
+
+  try {
+    const res = await fetch(`/api/schedules?${params.toString()}`);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err);
+    }
+    const schedules = await res.json();
+    statusEl.textContent = `총 ${schedules.length}건 조회됨`;
+
+    for (const s of schedules) {
+      const leg = s.legs[0] || {};
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${s.carrier_name} (${s.carrier_scac})</td>
+        <td>${leg.vessel_name || '-'} / ${leg.voyage || '-'}</td>
+        <td>${fmtDate(s.origin.estimated_date)}</td>
+        <td>${fmtDate(s.destination.estimated_date)}</td>
+        <td>${s.transit_time ?? '-'}일</td>
+        <td>${s.direct ? '직항' : '환적'}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+    table.style.display = schedules.length ? 'table' : 'none';
+  } catch (err) {
+    statusEl.textContent = `조회 실패: ${err.message}`;
+  }
+});
+</script>
+</body>
+</html>
